@@ -5,9 +5,9 @@ go 1.23
 toolchain go1.23.9
 
 require (
-	github.com/gin-gonic/gin v1.10.0
+	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.2.2
-	github.com/shahal0/skillsync-protos v0.0.0-20250518151503-9c00e2a027ef
+	github.com/shahal0/skillsync-protos v0.0.0-20250523045229-1e16a5ab59e1
 	google.golang.org/grpc v1.72.1
 )
 

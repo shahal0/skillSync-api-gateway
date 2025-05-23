@@ -394,7 +394,15 @@ func employerLogin(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	// Log the response for debugging
+	log.Println("Employer login response:", resp)
+	
+	// Explicitly include all fields in the response
+	c.JSON(http.StatusOK, gin.H{
+		"id":      resp.Id,
+		"token":   resp.Token,
+		"message": resp.Message,
+	})
 }
 
 func employerVerifyEmail(c *gin.Context) {
