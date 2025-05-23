@@ -114,8 +114,55 @@ func GetJobs(c *gin.Context) {
 		return
 	}
 
-	// Create a clean response with just the jobs array
-	c.JSON(http.StatusOK, gin.H{"jobs": resp.Jobs})
+	// Transform protobuf jobs to JSON-friendly format
+	jobs := make([]map[string]interface{}, 0, len(resp.Jobs))
+	for _, job := range resp.Jobs {
+		// Format skills
+		skills := make([]map[string]string, 0, len(job.RequiredSkills))
+		for _, skill := range job.RequiredSkills {
+			skills = append(skills, map[string]string{
+				"skill": skill.Skill,
+				"proficiency": skill.Proficiency,
+			})
+		}
+
+			// Create company object
+		company := map[string]interface{}{
+			"location": job.Location, // Default to job location
+		}
+
+		// If employer profile exists, add its fields to company
+		if job.EmployerProfile != nil {
+			log.Printf("API Gateway: Using employer profile from job service for job %d", job.Id)
+			company["company_name"] = job.EmployerProfile.CompanyName
+			company["email"] = job.EmployerProfile.Email
+			company["industry"] = job.EmployerProfile.Industry
+			company["website"] = job.EmployerProfile.Website
+			company["location"] = job.EmployerProfile.Location
+		} else {
+			log.Printf("API Gateway: No employer profile found for job %d with employer ID %s", job.Id, job.EmployerId)
+		}
+
+		// Create job object
+		jobMap := map[string]interface{}{
+			"id":                  job.Id,
+			"employer_id":         job.EmployerId,
+			"title":               job.Title,
+			"description":         job.Description,
+			"category":            job.Category,
+			"required_skills":     skills,
+			"salary_min":          job.SalaryMin,
+			"salary_max":          job.SalaryMax,
+			"location":            job.Location,
+			"experience_required": job.ExperienceRequired,
+			"status":              job.Status,
+			"company":             company,
+		}
+
+		jobs = append(jobs, jobMap)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"jobs": jobs})
 }
 
 // ApplyToJob handles job application requests
@@ -134,11 +181,6 @@ func ApplyToJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Job ID is required"})
 		return
 	}
-
-	// Create gRPC request
-	// Make sure we're setting the parameters correctly
-	// CandidateId should be the user's ID, and JobId should be the job being applied to
-	// Convert jobID from string to uint64
 	jobIDUint, err := strconv.ParseUint(jobID, 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job ID format"})
@@ -149,8 +191,6 @@ func ApplyToJob(c *gin.Context) {
 		CandidateId: userID.(string), // The user applying for the job
 		JobId:       jobIDUint,       // The job being applied to, converted to uint64
 	}
-
-	// Create a context with metadata for user identification
 	ctx := context.Background()
 	// Add user ID and role as metadata to the gRPC request
 	md := metadata.New(map[string]string{
@@ -264,14 +304,11 @@ func UpdateJobStatus(c *gin.Context) {
 		EmployerId: userID.(string),
 	}
 
-	// Create metadata with authorization, user ID, and role
 	userRole, exists := c.Get("user_role")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User role not found in context"})
 		return
 	}
-
-	// Create metadata with all required fields
 	md := metadata.New(map[string]string{
 		"authorization": c.GetHeader("Authorization"),
 		"x-user-id":     userID.(string),
