@@ -12,5 +12,6 @@ func main() {
 	r := gin.Default()
 	routes.SetupRoutes(r)
 	routes.SetupJobRoutes(r)
+	routes.SetupChatNotificationRoutes(r)
 	r.Run(":8008")
 }

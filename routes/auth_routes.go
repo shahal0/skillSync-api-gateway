@@ -6,35 +6,11 @@ import (
 	"net/http"
 	"skillsync-api-gateway/clients"
 	"strings"
-
+	"skillsync-api-gateway/utils"
 	"github.com/gin-gonic/gin"
 	authpb "github.com/shahal0/skillsync-protos/gen/authpb"
 	"google.golang.org/grpc/metadata"
 )
-
-// min returns the smaller of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func extractToken(c *gin.Context) (string, error) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		return "", http.ErrNoCookie
-	}
-
-	// Ensure the token is in the correct format (Bearer token)
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return "", http.ErrNotSupported
-	}
-
-	// Extract the token by removing the "Bearer " prefix
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	return token, nil
-}
 
 func SetupRoutes(r *gin.Engine) {
 	auth := r.Group("/auth")
@@ -53,8 +29,8 @@ func SetupRoutes(r *gin.Engine) {
 		candidate.PUT("/Skills/update", candidateSkillsUpdate)
 		candidate.PUT("/Education/update", candidateEducationUpdate)
 		candidate.POST("/upload/resume", candidateUploadResume)
-		candidate.GET("/auth/google/login", candidateGoogleLogin)
-		candidate.GET("/auth/google/callback", candidateGoogleCallback)
+		candidate.GET("/google/login", candidateGoogleLogin)
+		candidate.GET("/google/callback", candidateGoogleCallback)
 	}
 
 	employer := auth.Group("/employer")
@@ -68,8 +44,8 @@ func SetupRoutes(r *gin.Engine) {
 		employer.PATCH("/change-password", employerChangePassword)
 		employer.GET("/profile", employerProfile)
 		employer.PUT("/profile/update", employerProfileUpdate)
-		employer.GET("/auth/google/login", employerGoogleLogin)
-		employer.GET("/auth/google/callback", employerGoogleCallback)
+		employer.GET("/google/login", employerGoogleLogin)
+		employer.GET("/google/callback", employerGoogleCallback)
 	}
 }
 
@@ -181,9 +157,7 @@ func candidateChangePassword(c *gin.Context) {
 func candidateProfile(c *gin.Context) {
 	// Log the request method and path for debugging
 	log.Printf("Request: %s %s", c.Request.Method, c.Request.URL.Path)
-
-	// Extract token from Authorization header using helper function
-	token, err := extractToken(c)
+	token, err := utils.ExtractToken(c)
 	if err != nil {
 		if err == http.ErrNoCookie {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
@@ -211,7 +185,7 @@ func candidateProfile(c *gin.Context) {
 
 func candidateProfileUpdate(c *gin.Context) {
 	// Extract token from Authorization header using helper function
-	token, err := extractToken(c)
+	token, err := utils.ExtractToken(c)
 	if err != nil {
 		if err == http.ErrNoCookie {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
@@ -241,7 +215,7 @@ func candidateProfileUpdate(c *gin.Context) {
 
 func candidateSkillsUpdate(c *gin.Context) {
 	// Extract token from Authorization header using helper function
-	token, err := extractToken(c)
+	token, err := utils.ExtractToken(c)
 	if err != nil {
 		if err == http.ErrNoCookie {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
@@ -275,7 +249,7 @@ func candidateSkillsUpdate(c *gin.Context) {
 
 func candidateEducationUpdate(c *gin.Context) {
 	// Extract token from Authorization header using helper function
-	token, err := extractToken(c)
+	token, err := utils.ExtractToken(c)
 	if err != nil {
 		if err == http.ErrNoCookie {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
@@ -309,7 +283,7 @@ func candidateEducationUpdate(c *gin.Context) {
 
 func candidateUploadResume(c *gin.Context) {
 	// Extract token from Authorization header using helper function
-	token, err := extractToken(c)
+	token, err := utils.ExtractToken(c)
 	if err != nil {
 		if err == http.ErrNoCookie {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
@@ -342,31 +316,83 @@ func candidateUploadResume(c *gin.Context) {
 }
 
 func candidateGoogleLogin(c *gin.Context) {
-	var req authpb.GoogleLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	// Get the redirect URI from query parameters or use a default one
+	redirectURI := c.Query("redirect_uri")
+	if redirectURI == "" {
+		// Must use the complete URL that's registered in Google Cloud Console
+		redirectURI = "http://localhost:8060/candidate/auth/google/callback"
 	}
-	resp, err := clients.AuthServiceClient.CandidateGoogleLogin(context.Background(), &req)
+	
+	// Log the redirect URI for debugging
+	log.Printf("Candidate Google login using redirect URI: %s", redirectURI)
+	
+	// Create the request with the redirect URI
+	req := &authpb.GoogleLoginRequest{	
+		RedirectUrl: redirectURI,
+	}
+	
+	// Call the Auth Service to get the Google authorization URL
+	resp, err := clients.AuthServiceClient.CandidateGoogleLogin(context.Background(), req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	
+	// The message field contains the authorization URL
+	authURL := resp.GetMessage()
+	if authURL == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate Google authorization URL"})
+		return
+	}
+	
+	// Redirect the user to the Google authorization URL
+	c.Redirect(http.StatusTemporaryRedirect, authURL)
 }
 
 func candidateGoogleCallback(c *gin.Context) {
-	var req authpb.GoogleCallbackRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Get the authorization code from the query parameters
+	code := c.Query("code")
+	
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing authorization code"})
 		return
 	}
-	resp, err := clients.AuthServiceClient.CandidateGoogleCallback(context.Background(), &req)
+	
+	// Create the callback request with the code
+	req := &authpb.GoogleCallbackRequest{
+		Code: code,
+	}
+	
+	// Call the Auth Service to exchange the code for tokens
+	resp, err := clients.AuthServiceClient.CandidateGoogleCallback(context.Background(), req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	
+	// Check if we got a valid token
+	if resp.GetToken() == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to authenticate with Google"})
+		return
+	}
+	
+	// Set the token as a cookie or return it in the response
+	// Option 1: Set as cookie
+	c.SetCookie(
+		"auth_token",
+		resp.GetToken(),
+		3600*24, // 24 hours
+		"/",
+		"", // domain
+		true,  // secure
+		true,  // httpOnly
+	)
+	
+	// Option 2: Return in response
+	c.JSON(http.StatusOK, gin.H{
+		"token": resp.GetToken(),
+		"message": resp.GetMessage(),
+	})
 }
 
 func employerSignup(c *gin.Context) {
@@ -535,29 +561,79 @@ func employerProfileUpdate(c *gin.Context) {
 }
 
 func employerGoogleLogin(c *gin.Context) {
-	var req authpb.GoogleLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	// Get the redirect URI from query parameters or use a default one
+	redirectURI := c.Query("redirect_uri")
+	if redirectURI == "" {
+		// Must use the complete URL that's registered in Google Cloud Console
+		redirectURI = "http://localhost:8060/employer/auth/google/callback"
 	}
-	resp, err := clients.AuthServiceClient.EmployerGoogleLogin(context.Background(), &req)
+	
+	// Log the redirect URI for debugging
+	log.Printf("Employer Google login using redirect URI: %s", redirectURI)
+	
+	// Create the request with the redirect URI
+	req := &authpb.GoogleLoginRequest{	
+		RedirectUrl: redirectURI,
+	}
+	
+	// Call the Auth Service to get the Google authorization URL
+	resp, err := clients.AuthServiceClient.EmployerGoogleLogin(context.Background(), req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	
+	// The message field contains the authorization URL
+	authURL := resp.GetMessage()
+	if authURL == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate Google authorization URL"})
+		return
+	}
+	
+	// Redirect the user to the Google authorization URL
+	c.Redirect(http.StatusTemporaryRedirect, authURL)
 }
 
 func employerGoogleCallback(c *gin.Context) {
-	var req authpb.GoogleCallbackRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Get the authorization code from the query parameters
+	code := c.Query("code")
+	
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing authorization code"})
 		return
 	}
-	resp, err := clients.AuthServiceClient.EmployerGoogleCallback(context.Background(), &req)
+	
+	// Create the callback request with the code
+	req := &authpb.GoogleCallbackRequest{
+		Code: code,
+	}
+	
+	// Call the Auth Service to exchange the code for tokens
+	resp, err := clients.AuthServiceClient.EmployerGoogleCallback(context.Background(), req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, resp)
+	
+	// Check if we got a valid token
+	if resp.GetToken() == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to authenticate with Google"})
+		return
+	}
+	
+	c.SetCookie(
+		"auth_token",
+		resp.GetToken(),
+		3600*24, // 24 hours
+		"/",
+		"", // domain
+		true,  // secure
+		true,  // httpOnly
+	)
+	
+	// Option 2: Return in response
+	c.JSON(http.StatusOK, gin.H{
+		"token": resp.GetToken(),
+		"message": resp.GetMessage(),
+	})
 }

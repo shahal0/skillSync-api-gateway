@@ -34,7 +34,6 @@ func JWTMiddleware() gin.HandlerFunc {
 		tokenString := parts[1]
 		log.Printf("JWT Middleware: Token extracted: %s", tokenString)
 
-		// Get JWT secret from environment variable or use fallback
 		jwtSecret := os.Getenv("JWT_SECRET")
 		if jwtSecret == "" {
 			jwtSecret = "your_jwt_secret" 

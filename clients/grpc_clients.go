@@ -4,13 +4,17 @@ import (
 	"google.golang.org/grpc"
 	"log"
 	"github.com/shahal0/skillsync-protos/gen/authpb"
+	"github.com/shahal0/skillsync-protos/gen/chatpb"
 	jobpb "github.com/shahal0/skillsync-protos/gen/jobpb"
+	"github.com/shahal0/skillsync-protos/gen/notificationpb"
 	"os"
 )
 
 var (
-	AuthServiceClient authpb.AuthServiceClient
-	JobServiceClient  jobpb.JobServiceClient
+	AuthServiceClient         authpb.AuthServiceClient
+	JobServiceClient          jobpb.JobServiceClient
+	ChatServiceClient         chatpb.ChatServiceClient
+	NotificationServiceClient notificationpb.NotificationServiceClient
 )
 
 func getEnv(key, fallback string) string {
@@ -35,5 +39,11 @@ func InitClients() {
 		log.Fatalf("Failed to connect to job-service: %v", err)
 	}
 	JobServiceClient = jobpb.NewJobServiceClient(jobConn)
+	chatNotifConn, err := grpc.Dial(getEnv("CHAT_NOTIFICATION_SERVICE_URL", "localhost:50053"), grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("Failed to connect to chat-notification-service: %v", err)
+	}
+	ChatServiceClient = chatpb.NewChatServiceClient(chatNotifConn)
+	NotificationServiceClient = notificationpb.NewNotificationServiceClient(chatNotifConn)
 }
 
