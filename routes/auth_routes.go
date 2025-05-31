@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/http"
 	"skillsync-api-gateway/clients"
-	"strings"
-	"skillsync-api-gateway/utils"
+	"skillsync-api-gateway/middlewares"
+	//"skillsync-api-gateway/utils"
 	"github.com/gin-gonic/gin"
 	authpb "github.com/shahal0/skillsync-protos/gen/authpb"
 	"google.golang.org/grpc/metadata"
@@ -15,37 +15,51 @@ import (
 func SetupRoutes(r *gin.Engine) {
 	auth := r.Group("/auth")
 
-	candidate := auth.Group("/candidate")
+	// Public candidate routes (no authentication required)
+	candidatePublic := auth.Group("/candidate")
 	{
-		candidate.POST("/signup", candidateSignup)
-		candidate.POST("/login", candidateLogin)
-		candidate.POST("/verify-email", candidateVerifyEmail)
-		candidate.POST("/resend-otp", candidateResendOtp)
-		candidate.POST("/forgot-password", candidateForgotPassword)
-		candidate.PUT("/reset-password", candidateResetPassword)
-		candidate.PATCH("/change-password", candidateChangePassword)
-		candidate.GET("/profile", candidateProfile)
-		candidate.PUT("/profile/update", candidateProfileUpdate)
-		candidate.PUT("/Skills/update", candidateSkillsUpdate)
-		candidate.PUT("/Education/update", candidateEducationUpdate)
-		candidate.POST("/upload/resume", candidateUploadResume)
-		candidate.GET("/google/login", candidateGoogleLogin)
-		candidate.GET("/google/callback", candidateGoogleCallback)
+		candidatePublic.POST("/signup", candidateSignup)
+		candidatePublic.POST("/login", candidateLogin)
+		candidatePublic.POST("/verify-email", candidateVerifyEmail)
+		candidatePublic.POST("/resend-otp", candidateResendOtp)
+		candidatePublic.POST("/forgot-password", candidateForgotPassword)
+		candidatePublic.PUT("/reset-password", candidateResetPassword)
+		candidatePublic.GET("/google/login", candidateGoogleLogin)
+		candidatePublic.GET("/google/callback", candidateGoogleCallback)
 	}
 
-	employer := auth.Group("/employer")
+	// Protected candidate routes (authentication required)
+	candidateProtected := auth.Group("/candidate")
+	candidateProtected.Use(middlewares.JWTMiddleware())
 	{
-		employer.POST("/signup", employerSignup)
-		employer.POST("/login", employerLogin)
-		employer.POST("/verify-email", employerVerifyEmail)
-		employer.POST("/resend-otp", employerResendOtp)
-		employer.POST("/forgot-password", employerForgotPassword)
-		employer.POST("/reset-password", employerResetPassword)
-		employer.PATCH("/change-password", employerChangePassword)
-		employer.GET("/profile", employerProfile)
-		employer.PUT("/profile/update", employerProfileUpdate)
-		employer.GET("/google/login", employerGoogleLogin)
-		employer.GET("/google/callback", employerGoogleCallback)
+		candidateProtected.PATCH("/change-password", candidateChangePassword)
+		candidateProtected.GET("/profile", candidateProfile)
+		candidateProtected.PUT("/profile/update", candidateProfileUpdate)
+		candidateProtected.PUT("/Skills/update", candidateSkillsUpdate)
+		candidateProtected.PUT("/Education/update", candidateEducationUpdate)
+		candidateProtected.POST("/upload/resume", candidateUploadResume)
+	}
+
+	// Public employer routes (no authentication required)
+	employerPublic := auth.Group("/employer")
+	{
+		employerPublic.POST("/signup", employerSignup)
+		employerPublic.POST("/login", employerLogin)
+		employerPublic.POST("/verify-email", employerVerifyEmail)
+		employerPublic.POST("/resend-otp", employerResendOtp)
+		employerPublic.POST("/forgot-password", employerForgotPassword)
+		employerPublic.PUT("/reset-password", employerResetPassword)
+		employerPublic.GET("/google/login", employerGoogleLogin)
+		employerPublic.GET("/google/callback", employerGoogleCallback)
+	}
+
+	// Protected employer routes (authentication required)
+	employerProtected := auth.Group("/employer")
+	employerProtected.Use(middlewares.JWTMiddleware())
+	{
+		employerProtected.PATCH("/change-password", employerChangePassword)
+		employerProtected.GET("/profile", employerProfile)
+		employerProtected.PUT("/profile/update", employerProfileUpdate)
 	}
 }
 
@@ -141,12 +155,28 @@ func candidateResetPassword(c *gin.Context) {
 }
 
 func candidateChangePassword(c *gin.Context) {
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	// Parse request body
 	var req authpb.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	resp, err := clients.AuthServiceClient.CandidateChangePassword(context.Background(), &req)
+
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
+
+	// Call gRPC service with metadata context
+	resp, err := clients.AuthServiceClient.CandidateChangePassword(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -157,23 +187,24 @@ func candidateChangePassword(c *gin.Context) {
 func candidateProfile(c *gin.Context) {
 	// Log the request method and path for debugging
 	log.Printf("Request: %s %s", c.Request.Method, c.Request.URL.Path)
-	token, err := utils.ExtractToken(c)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		}
+	
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
-	log.Printf("Extracted token is empty")
 
-	// Create request with token only
-	req := &authpb.CandidateProfileRequest{
-		Token: token,
-	}
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
 
-	resp, err := clients.AuthServiceClient.CandidateProfile(context.Background(), req)
+	// Create request with empty fields - the Auth Service will extract user ID from context
+	req := &authpb.CandidateProfileRequest{}
+
+	resp, err := clients.AuthServiceClient.CandidateProfile(ctx, req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -184,14 +215,10 @@ func candidateProfile(c *gin.Context) {
 }
 
 func candidateProfileUpdate(c *gin.Context) {
-	// Extract token from Authorization header using helper function
-	token, err := utils.ExtractToken(c)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		}
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
@@ -202,29 +229,29 @@ func candidateProfileUpdate(c *gin.Context) {
 		return
 	}
 
-	// Set the token from the header
-	req.Token = token
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
 
-	resp, err := clients.AuthServiceClient.CandidateProfileUpdate(context.Background(), &req)
+	// Call gRPC service with metadata context
+	resp, err := clients.AuthServiceClient.CandidateProfileUpdate(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, resp)
 }
 
 func candidateSkillsUpdate(c *gin.Context) {
-	// Extract token from Authorization header using helper function
-	token, err := utils.ExtractToken(c)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		}
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
-
 	// Parse request body
 	var req authpb.SkillsUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -232,13 +259,13 @@ func candidateSkillsUpdate(c *gin.Context) {
 		return
 	}
 
-	// Create a context with the token in the metadata
+	// Create context with metadata for auth service
 	ctx := metadata.NewOutgoingContext(
 		context.Background(),
-		metadata.Pairs("authorization", token),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
 	)
 
-	// Call the gRPC method with the context containing the token
+	// Call gRPC service with metadata context
 	resp, err := clients.AuthServiceClient.CandidateSkillsUpdate(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -248,16 +275,13 @@ func candidateSkillsUpdate(c *gin.Context) {
 }
 
 func candidateEducationUpdate(c *gin.Context) {
-	// Extract token from Authorization header using helper function
-	token, err := utils.ExtractToken(c)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		}
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
+	log.Printf("Using user ID from JWT context: %s", userID)
 
 	// Parse request body
 	var req authpb.EducationUpdateRequest
@@ -266,13 +290,13 @@ func candidateEducationUpdate(c *gin.Context) {
 		return
 	}
 
-	// Create a context with the token in the metadata
+	// Create context with metadata for auth service
 	ctx := metadata.NewOutgoingContext(
 		context.Background(),
-		metadata.Pairs("authorization", token),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
 	)
 
-	// Call the gRPC method with the context containing the token
+	// Call gRPC service with metadata context
 	resp, err := clients.AuthServiceClient.CandidateEducationUpdate(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -282,16 +306,13 @@ func candidateEducationUpdate(c *gin.Context) {
 }
 
 func candidateUploadResume(c *gin.Context) {
-	// Extract token from Authorization header using helper function
-	token, err := utils.ExtractToken(c)
-	if err != nil {
-		if err == http.ErrNoCookie {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		}
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
+	log.Printf("Using user ID from JWT context: %s", userID)
 
 	// Parse request body
 	var req authpb.UploadResumeRequest
@@ -300,13 +321,13 @@ func candidateUploadResume(c *gin.Context) {
 		return
 	}
 
-	// Create a context with the token in the metadata
+	// Create context with metadata for auth service
 	ctx := metadata.NewOutgoingContext(
 		context.Background(),
-		metadata.Pairs("authorization", token),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
 	)
 
-	// Call the gRPC method with the context containing the token
+	// Call gRPC service with metadata context
 	resp, err := clients.AuthServiceClient.CandidateUploadResume(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -488,12 +509,29 @@ func employerResetPassword(c *gin.Context) {
 }
 
 func employerChangePassword(c *gin.Context) {
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
+		return
+	}
+	log.Printf("Using user ID from JWT context: %s", userID)
+
+	// Parse request body
 	var req authpb.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	resp, err := clients.AuthServiceClient.EmployerChangePassword(context.Background(), &req)
+
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
+
+	// Call gRPC service with metadata context
+	resp, err := clients.AuthServiceClient.EmployerChangePassword(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -502,25 +540,24 @@ func employerChangePassword(c *gin.Context) {
 }
 
 func employerProfile(c *gin.Context) {
-	// Extract token from Authorization header
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
+	log.Printf("Using user ID from JWT context: %s", userID)
 
-	// Ensure the token is in the correct format (Bearer token)
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		return
-	}
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
 
-	// Create request with token only
-	req := &authpb.EmployerProfileRequest{
-		Token: authHeader,
-	}
+	// Create empty request - the Auth Service will extract user ID from context
+	req := &authpb.EmployerProfileRequest{}
 
-	resp, err := clients.AuthServiceClient.EmployerProfile(context.Background(), req)
+	resp, err := clients.AuthServiceClient.EmployerProfile(ctx, req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
@@ -529,18 +566,13 @@ func employerProfile(c *gin.Context) {
 }
 
 func employerProfileUpdate(c *gin.Context) {
-	// Extract token from Authorization header
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization token required"})
+	// Extract user ID from context (set by JWTMiddleware)
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
-
-	// Ensure the token is in the correct format (Bearer token)
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format, expected 'Bearer token'"})
-		return
-	}
+	log.Printf("Using user ID from JWT context: %s", userID)
 
 	// Parse request body
 	var req authpb.EmployerProfileUpdateRequest
@@ -549,14 +581,19 @@ func employerProfileUpdate(c *gin.Context) {
 		return
 	}
 
-	// Set the token from the header
-	req.Token = authHeader
+	// Create context with metadata for auth service
+	ctx := metadata.NewOutgoingContext(
+		context.Background(),
+		metadata.New(map[string]string{"user-id": userID.(string)}),
+	)
 
-	resp, err := clients.AuthServiceClient.EmployerProfileUpdate(context.Background(), &req)
+	// Call gRPC service with metadata context
+	resp, err := clients.AuthServiceClient.EmployerProfileUpdate(ctx, &req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
+
 	c.JSON(http.StatusOK, resp)
 }
 

@@ -1,13 +1,14 @@
 package clients
 
 import (
+	"fmt"
 	"google.golang.org/grpc"
 	"log"
-	"github.com/shahal0/skillsync-protos/gen/authpb"
-	"github.com/shahal0/skillsync-protos/gen/chatpb"
-	jobpb "github.com/shahal0/skillsync-protos/gen/jobpb"
-	"github.com/shahal0/skillsync-protos/gen/notificationpb"
 	"os"
+	"github.com/shahal0/skillsync-protos/gen/authpb"
+	chatpb "github.com/shahal0/skillsync-protos/gen/chatpb"
+	jobpb "github.com/shahal0/skillsync-protos/gen/jobpb"
+	notificationpb "github.com/shahal0/skillsync-protos/gen/notificationpb"
 )
 
 var (
@@ -23,6 +24,19 @@ func getEnv(key, fallback string) string {
 	}
 	log.Printf("Environment variable %s not set, using default: %s", key, fallback)
 	return fallback
+}
+
+// GetChatClient returns the chat service client
+func GetChatClient() (chatpb.ChatServiceClient, error) {
+	if ChatServiceClient == nil {
+		return nil, fmt.Errorf("chat service client not initialized")
+	}
+	return ChatServiceClient, nil
+}
+
+// GetNotificationClient returns the notification service client
+func GetNotificationClient() notificationpb.NotificationServiceClient {
+	return NotificationServiceClient
 }
 
 func InitClients() {
