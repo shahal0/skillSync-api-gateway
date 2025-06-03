@@ -120,6 +120,37 @@ Environment variables are used for configuration:
 go run main.go
 ```
 
+## Profiling
+
+The API Gateway includes built-in profiling capabilities using Go's `pprof` package. The profiling server runs on port 6062.
+
+### Accessing Profiling Data
+
+1. While the service is running, access the profiling interface at: http://localhost:6062/debug/pprof/
+2. Available profiles include:
+   - CPU profiling: http://localhost:6062/debug/pprof/profile
+   - Heap profiling: http://localhost:6062/debug/pprof/heap
+   - Goroutine profiling: http://localhost:6062/debug/pprof/goroutine
+   - Block profiling: http://localhost:6062/debug/pprof/block
+   - Thread creation profiling: http://localhost:6062/debug/pprof/threadcreate
+
+### Using the Go Tool
+
+You can also use the Go tool to analyze profiles:
+
+```bash
+# CPU profile (30-second sample)
+go tool pprof http://localhost:6062/debug/pprof/profile
+
+# Memory profile
+go tool pprof http://localhost:6062/debug/pprof/heap
+
+# Goroutine profile
+go tool pprof http://localhost:6062/debug/pprof/goroutine
+```
+
+Once in the pprof interactive mode, you can use commands like `top`, `web`, `list`, etc. to analyze the profile.
+
 ## Error Handling
 
 The API Gateway provides consistent error responses in the following format:

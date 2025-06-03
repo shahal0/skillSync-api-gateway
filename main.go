@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"skillsync-api-gateway/clients"
 	"skillsync-api-gateway/routes"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	_ "net/http/pprof" // Import pprof for profiling
 )
 
 func main() {
@@ -42,6 +44,14 @@ func main() {
 	if port == "" {
 		port = "8008"
 	}
+
+	// Start pprof HTTP server for profiling
+	go func() {
+		log.Println("Starting pprof profiling server on port 6062")
+		if err := http.ListenAndServe("localhost:6062", nil); err != nil {
+			log.Printf("Pprof server failed: %v", err)
+		}
+	}()
 
 	// Start the server
 	log.Printf("Starting API Gateway server on port %s", port)
