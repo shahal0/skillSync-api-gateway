@@ -27,6 +27,31 @@ The API Gateway communicates with the following services:
 
 - **Auth Service**: User authentication, registration, and profile management
 - **Job Service**: Job posting, application, and search functionality
+- **Chat Notification Service**: Real-time messaging and notifications
+
+## Environment Setup
+
+A sample environment file (`.env.sample`) is provided to show the required environment variables. To set up your local development environment:
+
+```bash
+# Copy the sample env file
+cp .env.sample .env
+
+# Edit the .env file with your specific values
+```
+
+### Required Environment Variables
+
+Key environment variables include:
+
+- `PORT`: The port on which the API Gateway will listen (default: 8080)
+- `GIN_MODE`: Server mode (`debug` or `release`)
+- `JWT_SECRET`: Secret key for JWT token validation
+- `JWT_EXPIRATION_HOURS`: JWT token expiration time in hours
+- Service URLs for backend services:
+  - `AUTH_SERVICE_URL`
+  - `JOB_SERVICE_URL`
+  - `CHAT_NOTIFICATION_SERVICE_URL`
 
 ## API Endpoints
 
